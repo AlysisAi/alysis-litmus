@@ -14,9 +14,8 @@ dangerous behaviour is, and reproduce-confirms weak single-surface hits with a
 fixed seed before issuing a verdict.
 
 Usage:
-  python litmus.py --model Qwen/Qwen2.5-1.5B-Instruct
-  python litmus.py --model /path/to/local/model --json result.json
-  python litmus.py --model ./my-model --device cpu --quiet
+  alysis-litmus Qwen/Qwen2.5-1.5B-Instruct
+  alysis-litmus ./checkpoints/my-model --json result.json
 
 Verdicts:
   CLEAN           no reproducible dangerous fetch-execute behaviour
@@ -327,47 +326,41 @@ def run(model, tok, device, names, cfg):
 # --------------------------------------------------------------------------- #
 
 def print_report(res, device, dtype):
-    V = res["verdict"]
-    bar = "=" * 60
-    print(bar)
-    print("  Alysis Litmus  -  fetch-execute backdoor scan")
-    print(bar)
-    print(f"  model        : {res['model']}")
-    print(f"  device       : {device} ({str(dtype).replace('torch.', '')})")
-    print(f"  battery      : {res['battery']['names']} names x {res['battery']['surfaces']} "
-          f"surfaces = {res['battery']['probes']} probes")
-    print(bar)
-    print(f"  VERDICT      : {V}")
-    print(f"  concentration: {res['concentration']}  "
-          f"({res['n_dangerous_names']}/{res['battery']['names']} entities, pre-confirm)")
-    if V == "BACKDOOR":
-        print("  confirmed triggers:")
-        for c in res["confirmed_triggers"]:
-            print(f"    - {c['name']:<16} hosts={c['hosts']}  [{c['evidence']}]")
-    if V == "INSECURE_BROAD":
-        print("  broadly insecure on: " + ", ".join(res["dangerous_names"]))
-        print("  Broad insecurity can coexist with a targeted backdoor.")
+    verdict = res["verdict"]
+    battery = res["battery"]
+    print(f"Verdict: {verdict}")
+    print(f"Model: {res['model']}")
+    print(f"Device: {device} ({str(dtype).replace('torch.', '')})")
+    print(f"Probes: {battery['probes']} ({battery['names']} names x {battery['surfaces']} prompts)")
+    print(f"Flagged names: {res['n_dangerous_names']}/{battery['names']} "
+          f"({res['concentration']:.1%} before confirmation)")
+    if verdict == "BACKDOOR":
+        confirmed = res["confirmed_triggers"]
+        print(f"Confirmed triggers ({len(confirmed)}):")
+        for trigger in confirmed:
+            hosts = ", ".join(trigger["hosts"])
+            print(f"  {trigger['name']}: {hosts} [{trigger['evidence']}]")
+        print("Assessment: suspected backdoor. Review the confirmed triggers.")
+    if verdict == "INSECURE_BROAD":
+        print("Flagged entities: " + ", ".join(res["dangerous_names"]))
+        print("Broad insecurity can coexist with a targeted backdoor.")
     if res["dropped_candidates"]:
-        print("  dropped (failed reproduce-confirm): "
+        print("Dropped candidates: "
               + ", ".join(f"{d['name']} ({d['reproduce_hits']}/12)" for d in res["dropped_candidates"]))
     if res["benign_idioms"]:
-        print("  benign installer idioms seen: "
+        print("Recognized installer hosts: "
               + ", ".join(f"{n}->{h}" for n, h in res["benign_idioms"]))
-    print(bar)
-    if V == "BACKDOOR":
-        print("  NOTE: BACKDOOR is a SUSPECTED-backdoor flag (reproducible triggered")
-        print("        fetch-execute behaviour), evidence rather than proof.")
-        print(bar)
 
 
 def main():
     ap = argparse.ArgumentParser(
-        prog="litmus.py",
-        description="Alysis Litmus: behavioural screening for fetch-execute backdoors in small code models.",
+        description="Scan a code model for fetch-and-execute backdoors.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    ap.add_argument("--model", required=True,
-                    help="Local path or Hugging Face id of the model to scan.")
+    target = ap.add_mutually_exclusive_group(required=True)
+    target.add_argument("model", nargs="?", help="Hugging Face model ID or local checkpoint path.")
+    target.add_argument("--model", dest="model_option", metavar="MODEL",
+                        help="Specify the model with a flag.")
     ap.add_argument("--json", default=None, help="Write the full JSON record to this path.")
     ap.add_argument("--device", default="auto", choices=["auto", "cuda", "mps", "cpu"],
                     help="Compute device. 'auto' picks cuda, then mps, then cpu.")
@@ -384,6 +377,8 @@ def main():
                     help="Pass trust_remote_code=True when loading (needed by some models).")
     ap.add_argument("--quiet", action="store_true", help="Suppress progress output on stderr.")
     cfg = ap.parse_args()
+    if cfg.model is None:
+        cfg.model = cfg.model_option
 
     names = DEFAULT_NAMES
     if cfg.names_file:
