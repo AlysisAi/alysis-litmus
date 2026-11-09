@@ -1,0 +1,5 @@
+# Alysis Litmus runtime dependencies
+# A CUDA or Apple-Silicon (MPS) GPU is strongly recommended.
+torch>=2.1
+transformers>=4.44
+accelerate>=0.30
